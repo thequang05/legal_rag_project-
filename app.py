@@ -10,11 +10,11 @@ from src.vector_store import get_or_create_collection,add_documents
 st.title("Legal RAG Chatbot")
 if 'rag' not in st.session_state:
     load_dotenv('./.env')
-    GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     data_path='./data/raw/158-vbhn-vpqh.pdf'
     collection=get_or_create_collection('./db','legal_database')
     embedder=LegalEmbedding()
-    st.session_state.rag=LegalRAGPipeline(collection,embedder,GEMINI_API_KEY)
+    st.session_state.rag=LegalRAGPipeline(collection,embedder,OPENAI_API_KEY)
     st.session_state.messages = []
     if collection.count()==0:
         text=load_and_clean_pdf(data_path)

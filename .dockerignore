@@ -1,0 +1,10 @@
+*
+!requirements.txt
+!backend/
+!backend/*.py
+!frontend/
+!frontend/__init__.py
+!frontend/index.html
+!frontend/assets/
+!frontend/assets/*.css
+!frontend/assets/*.js

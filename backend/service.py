@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 import unicodedata
 import logging
 import os
@@ -14,10 +15,12 @@ from .documents import Registry, now
 from .legal import LegalMetadata, validity
 from .parsing import validate_pdf, extract_chunks, build_contexts
 from .lexical import LexicalIndex
+from .rerank import Reranker
 from .vectors import VectorIndex
 from .generation import AnswerGenerator
 
 logger = logging.getLogger(__name__)
+ACCENTED = re.compile(r'[àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ]', re.IGNORECASE)
 
 
 class ServiceError(Exception):
@@ -27,7 +30,7 @@ class ServiceError(Exception):
 
 
 class DocumentService:
-    def __init__(self, settings, index=None, generator=None):
+    def __init__(self, settings, index=None, generator=None, reranker=None):
         self.settings = settings
         self.root = Path(settings.data_dir)
         self.root.mkdir(parents=True, exist_ok=True)
@@ -36,6 +39,7 @@ class DocumentService:
         self.registry = Registry(self.root / "registry.sqlite3")
         self.index = index or VectorIndex(self.root / "chroma", settings.embedding_model)
         self.lexical = LexicalIndex(self.registry)
+        self.reranker = reranker or (Reranker(settings.reranker_model) if settings.reranker_model else None)
         self.generator = generator or AnswerGenerator(settings.openai_api_key, settings.llm_model)
         self.lock = RLock()
         self.upload_lock = RLock()
@@ -65,9 +69,19 @@ class DocumentService:
             self.registry.recover()
             self.worker = Thread(target=self._run, name="document-ingestion", daemon=True)
             self.worker.start()
+            if self.reranker:
+                # Load models in the background so the first question is not slow.
+                Thread(target=self._warm_up, name="model-warm-up", daemon=True).start()
         except Exception:
             self.process_lock.release()
             raise
+
+    def _warm_up(self):
+        try:
+            self.index.embed_query("khởi động")
+            self.reranker.scores("khởi động", ["khởi động"])
+        except Exception:
+            logger.exception("Model warm-up failed; models will load on first use")
 
     def close(self):
         self.stop_event.set()
@@ -334,7 +348,7 @@ class DocumentService:
             for chunk_id, distance in extra.items():
                 candidates[chunk_id] = {'chunk_id': chunk_id, 'document_id': chunk_id.rsplit(':', 1)[0],
                                         'distance': distance, 'text': None}
-            sources = []
+            passed = []
             for chunk_id in sorted(candidates, key=lambda c: (-score[c], c)):
                 hit = candidates[chunk_id]
                 # A keyword match is evidence of relevance the embedding may miss, so it gets a looser semantic gate.
@@ -345,10 +359,28 @@ class DocumentService:
                 # SQLite evidence is authoritative; never expose a stale vector payload.
                 if hit['text'] is not None and evidence['text'] != hit['text']:
                     continue
-                sources.append({**evidence, 'citation_id':str(len(sources)+1), 'distance':hit['distance']})
-                if len(sources) == top_k:
+                passed.append({**evidence, 'distance': hit['distance']})
+                if len(passed) == pool:
                     break
+            passed = self._rerank(question, passed)[:top_k]
+            return [{**source, 'citation_id': str(position)} for position, source in enumerate(passed, start=1)]
+
+    def _rerank(self, question, sources):
+        """Reorder by reciprocal rank fusion of the retrieval order and a cross-encoder order.
+
+        The cross-encoder alone is weaker on unaccented questions, so it refines rather than replaces
+        the hybrid ranking. Without a reranker (or if it fails) the retrieval order is kept.
+        """
+        if not self.reranker or len(sources) < 2 or not ACCENTED.search(question):
+            # Unaccented questions are matched well by BM25 but poorly by the cross-encoder.
             return sources
+        scores = self.reranker.scores(question, [source['text'] for source in sources])
+        if scores is None:
+            return sources
+        by_score = sorted(range(len(sources)), key=lambda i: (-scores[i], i))
+        rerank_rank = {index: rank for rank, index in enumerate(by_score)}
+        order = sorted(range(len(sources)), key=lambda i: (-(1 / (60 + i) + 1 / (60 + rerank_rank[i])), i))
+        return [sources[i] for i in order]
 
     LEXICAL_DISTANCE_MARGIN = 0.2
     EXPAND_RADIUS = 12

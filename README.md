@@ -18,6 +18,7 @@ python app.py
 - **Swagger/API:** <http://127.0.0.1:8000/docs>
 - Có thể thay `python app.py` bằng `uvicorn backend.api:app --host 127.0.0.1 --port 8000 --workers 1`.
 - Không cần Node, npm build hoặc Streamlit để chạy giao diện. Frontend HTML/CSS/JavaScript được FastAPI phục vụ cùng origin.
+- **Rerank:** kết quả tìm kiếm được chấm lại bằng cross-encoder `RERANKER_MODEL` (mặc định `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1`, ~470MB, tải lần đầu về `HF_HOME`). Để trống biến này để tắt. Câu hỏi không dấu bỏ qua bước rerank. Nếu model không tải được, tìm kiếm vẫn chạy không rerank.
 - Chỉ chạy một process trên mỗi `DATA_DIR`. Dữ liệu nằm trong `data/backend`; model cache theo `HF_HOME` trong `.env`.
 
 ## Dùng giao diện

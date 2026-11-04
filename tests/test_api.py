@@ -321,3 +321,43 @@ def test_continuation_merges_only_overlapping_pieces_of_the_same_clause():
     assert not DocumentService._continues(first, {**base, 'text': 'jkl', 'start_char': 21, 'end_char': 24})
     assert not DocumentService._continues(first, {**base, 'text': 'ghi jkl', 'start_char': 18, 'end_char': 25, 'clause': '6'})
     assert not DocumentService._continues(first, {**base, 'text': 'ghi jkl', 'start_char': 18, 'end_char': 25, 'page': 3})
+
+
+
+class FakeReranker:
+    def __init__(self, scores):
+        self._scores = scores
+
+    def scores(self, question, texts):
+        return self._scores
+
+
+def _sources(n):
+    return [{'text': f't{i}', 'citation_id': str(i + 1)} for i in range(n)]
+
+
+def test_rerank_promotes_cross_encoder_favourite_but_keeps_retrieval_signal(stack):
+    _, service, _ = stack
+    service.reranker = FakeReranker([0.0, 0.1, 9.0, 0.2])
+    order = [s['text'] for s in service._rerank('đối tượng', _sources(4))]
+    assert order[0] == 't2' and order[1] == 't0'  # cross-encoder winner first, retrieval rank 1 next
+    assert sorted(order) == ['t0', 't1', 't2', 't3']
+
+
+def test_rerank_is_skipped_when_disabled_or_failing(stack):
+    _, service, _ = stack
+    sources = _sources(3)
+    service.reranker = None
+    assert service._rerank('q', sources) == sources
+    service.reranker = FakeReranker(None)
+    assert service._rerank('q', sources) == sources
+    service.reranker = FakeReranker([5.0])
+    assert service._rerank('q', sources[:1]) == sources[:1]
+
+
+def test_rerank_skips_unaccented_questions(stack):
+    _, service, _ = stack
+    service.reranker = FakeReranker([0.0, 0.1, 9.0])
+    sources = _sources(3)
+    assert service._rerank('doi tuong ap dung', sources) == sources
+    assert service._rerank('đối tượng áp dụng', sources) != sources

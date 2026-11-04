@@ -8,6 +8,7 @@ services:
       BACKEND_API_KEY: ${BACKEND_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}
+      RERANKER_MODEL: ${RERANKER_MODEL:-cross-encoder/mmarco-mMiniLMv2-L12-H384-v1}
       MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-20971520}
       MAX_PDF_PAGES: ${MAX_PDF_PAGES:-500}
     volumes:
